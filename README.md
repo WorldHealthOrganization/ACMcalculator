@@ -26,7 +26,7 @@ then `R` should install the app and close. There will then be an app called "ACM
 * Alternatively, you can install it on your local machine using the ACMCalculator R package. First install it for `R`:
 ```r
 install.packages("devtools")
-devtools::install_github("handcock/ACMCalculator")
+devtools::install_github("WorldHealthOrganization/ACMcalculator")    
 ```
 then run it from `R`:
 ```r
