@@ -118,6 +118,9 @@ days_in_mon <- function(ym) {
 
 # Function to calculate spline models for the data
 calculate_spline <- function(src, events_date = list(c("2020-01-01", "2023-05-31"))) {
+  if (!("CAUSE" %in% names(src))) {
+    src$CAUSE <- "Total"
+  }
   src <- src[order(src$REGION, src$SEX, src$AGE_GROUP, src$CAUSE, src$YEAR, src$PERIOD), ]
   if (is.null(src$NO_DEATHS)) {
     if (is.null(src$DEATHS)) {
@@ -314,12 +317,15 @@ calculate_spline <- function(src, events_date = list(c("2020-01-01", "2023-05-31
   out <- out[, c("REGION", "WM_IDENTIFIER", "YEAR", "PERIOD", "SEX", "AGE_GROUP", "CAUSE", "EVENTS", "SERIES", "NO_DEATHS", "EXPECTED", "LOWER_LIMIT", "UPPER_LIMIT", "EXCESS_DEATHS", "P_SCORE", "EXCESS_LOWER", "EXCESS_UPPER", "SE_CUM_EXPECTED")]
 
   message("Computation of the expected deaths completed successfully.")
-
+  # To be confirmed!!!!
+  attr(out, "num_deaths") <- sum(out$NO_DEATHS, na.rm = TRUE) / n_pat / l_period
+  attr(out, "SE_cumulative_deaths") <- NA
+  
   return(out)
 }
 
 # Apply the spline calculation function to the dataset and write results to Excel
-# pout <- calculate_spline(df0, events_date = list(c("2020-01-01", "2024-05-30")))
+# pout <- calculate_spline(df0, events_date = list(c("2020-01-01", "2024-05-31")))
 
 
 calculate_spline2 <- function(src) {
