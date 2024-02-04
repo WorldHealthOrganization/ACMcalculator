@@ -100,7 +100,235 @@ attr.info <- function(df, colname, numattrs, breaks) {
 
 calculate_age <- function(src) { return(sort(unique(src$AGE_GROUP)))}
 
-calculate_spline <- function(src) {
+
+# Function to calculate days in a month considering leap years
+days_in_mon <- function(ym) {
+  year <- ym[1]
+  month <- ym[2]
+  days <- ifelse(month %in% c(1, 3, 5, 7, 8, 10, 12), 31,
+    ifelse(month %in% c(4, 6, 9, 11), 30,
+      ifelse(month == 2, ifelse(year %% 4 == 0 & (year %% 100 != 0 | year %% 400 == 0), 29, 28), NA)
+    )
+  )
+  days
+}
+
+# Define multiple significant event dates
+# events_date <- list(c("2020-01-01", "2023-05-31"), c("2023-10-12", "2024-12-30"))
+
+# Function to calculate spline models for the data
+calculate_spline <- function(src, events_date = list(c("2020-01-01", "2023-05-31"))) {
+  if (!("CAUSE" %in% names(src))) {
+    src$CAUSE <- "Total"
+  }
+  src <- src[order(src$REGION, src$SEX, src$AGE_GROUP, src$CAUSE, src$YEAR, src$PERIOD), ]
+  if (is.null(src$NO_DEATHS)) {
+    if (is.null(src$DEATHS)) {
+      stop("The data should have a column called 'NO_DEATHS', containing the number of all-cause deaths for that period.")
+    } else {
+      src$NO_DEATHS <- as.numeric(src$DEATHS)
+    }
+  } else {
+    src$NO_DEATHS <- as.numeric(src$NO_DEATHS)
+  }
+
+  l_period <- ifelse(max(src$PERIOD, na.rm = TRUE) == 12, 12, 53)
+
+  if (l_period == 12) {
+    # years and months
+    dates <- as.Date(paste0(src$YEAR, "-", src$PERIOD, "-15"))
+    days <- apply(as.matrix(src[, c("YEAR", "PERIOD")]), 1, days_in_mon)
+    num.cycle <- 12
+    len.cycle <- 30
+    wm_ident <- c("Month", "Week")[1]
+  } else {
+    # years and weeks
+    dates <- ISOweek::ISOweek2date(paste0(src$YEAR, "-W", sprintf("%02d", src$PERIOD), "-1"))
+    days <- 7
+    num.cycle <- 53
+    len.cycle <- 7
+    wm_ident <- c("Month", "Week")[2]
+  }
+
+  event_vector <- rep(0, length(dates))
+
+  # Match the dates and events_date
+  for (pos in 1:length(events_date)) {
+    event <- events_date[[pos]]
+    event_vector[as.Date(dates) >= as.Date(event[1]) & as.Date(dates) <= as.Date(event[2])] <- pos
+  }
+
+  src$logdays <- log(days)
+  src$EVENTS <- event_vector
+
+  pattern <- unique(paste(src$REGION, src$SEX, src$AGE_GROUP, src$CAUSE))
+  n_pat <- length(pattern)
+
+  pout <- lapply(1:n_pat, function(x) {
+    message(pattern[x])
+    patt_src <- src[paste(src$REGION, src$SEX, src$AGE_GROUP, src$CAUSE) == pattern[x], ]
+
+    fit_data <- predict_data <- patt_src
+    fit_data$NO_DEATHS[as.numeric(fit_data$EVENTS) > 0] <- NA
+
+    predict_data <- predict_data[predict_data$YEAR >= 2020, ]
+
+    ##############################################
+    # Historical average
+    ##############################################
+    out <- predict_data
+    his_data <- fit_data %>%
+      group_by(PERIOD) %>%
+      summarise(
+        ave_deaths = mean(NO_DEATHS, na.rm = TRUE),
+        var_deaths = var(NO_DEATHS, na.rm = TRUE),
+        num_deaths = sum(NO_DEATHS, na.rm = TRUE),
+        num_periods = sum(!is.na(NO_DEATHS), na.rm = TRUE),
+        .groups = "drop"
+      ) %>%
+      ungroup() %>%
+      as.data.frame()
+
+    if (length(his_data$num_deaths) >= 53 & his_data$num_deaths[53] < 3) {
+      his_data$var_deaths[53] <- his_data$var_deaths[52]
+    }
+
+    if (his_data$num_deaths[1] < 3) {
+      his_data$var_deaths[1] <- his_data$var_deaths[2]
+    }
+
+    # Note: Calculate the 95% confidence interval with SE instead of SD for historical average by dviding the square root of the number of periods
+    his_data$ave_deaths_lower <- his_data$ave_deaths - qnorm(0.975) * sqrt(his_data$var_deaths * (1 + 1 / his_data$num_deaths)) / sqrt(his_data$num_periods)
+
+    his_data$ave_deaths_upper <- his_data$ave_deaths + qnorm(0.975) * sqrt(his_data$var_deaths * (1 + 1 / his_data$num_deaths)) / sqrt(his_data$num_periods)
+
+    out_hist <- out %>%
+      left_join(his_data, by = "PERIOD") %>%
+      mutate(
+        SERIES = "Historical average",
+        SE_CUM_EXPECTED = sqrt(var_deaths * (1 + 1 / num_deaths) / num_periods)
+      ) %>%
+      rename(
+        ESTIMATE = ave_deaths,
+        LOWER_LIMIT = ave_deaths_lower,
+        UPPER_LIMIT = ave_deaths_upper
+      )
+
+    ##############################################
+    # Negative Binomial Model
+    ##############################################
+    out <- predict_data
+    fit <- mgcv::gam(NO_DEATHS ~ offset(logdays) + YEAR + s(PERIOD, bs = "cc", fx = TRUE, k = 5),
+      knots = list(PERIOD = c(0, num.cycle)), method = "REML",
+      family = nb(), data = fit_data
+    )
+
+    if (FALSE) {
+      ##############################################
+      # Method 1
+      estim <- mgcv::predict.gam(fit, newdata = predict_data, se.fit = TRUE, type = "response")
+      out$estim.median <- as.numeric(estim$fit)
+      out$estim.lower <- as.numeric(estim$fit - qnorm(0.975) * estim$se.fit)
+      out$estim.upper <- as.numeric(estim$fit + qnorm(0.975) * estim$se.fit)
+    }
+
+    if (FALSE) {
+      ##############################################
+      # Method 2
+      estim <- mgcv::predict.gam(fit, newdata = predict_data, se.fit = TRUE)
+      estim.median <- estim$fit
+      estim.lower <- estim$fit
+      estim.upper <- estim$fit
+      theta <- fit$family$getTheta(TRUE)
+      set.seed(1)
+      i <- 1
+      for (i in 1:length(estim.median)) {
+        a <- rnorm(n = 10000, mean = estim$fit[i], sd = estim$se.fit[i])
+        b <- qnbinom(mu = exp(a), size = theta, p = 0.5)
+        c <- quantile(b, probs = c(0.025, 0.5, 0.975))
+        estim.median[i] <- c[2]
+        estim.lower[i] <- c[1]
+        estim.upper[i] <- c[3]
+      }
+      out$estim.median <- as.numeric(estim.median)
+      out$estim.lower <- as.numeric(estim.lower)
+      out$estim.upper <- as.numeric(estim.upper)
+    }
+
+    if (TRUE) {
+      ##############################################
+      # Method 3
+      estim <- mgcv::predict.gam(fit, newdata = predict_data, se.fit = TRUE)
+      theta <- fit$family$getTheta(TRUE)
+      # covariance of predictors
+      Terms <- list(stats::delete.response(fit$pterms))
+      mf <- model.frame(Terms[[1]], predict_data, xlev = fit$xlevels)
+      Xfrag <- mgcv::PredictMat(fit$smooth[[1]], predict_data)
+      X <- matrix(0, nrow(predict_data), ncol(Xfrag) + 2)
+      X[, 1:2] <- model.matrix(Terms[[1]], mf, contrasts = NULL)
+      X[, -c(1:2)] <- Xfrag
+      V <- X %*% fit$Vp %*% t(X)
+
+      set.seed(1)
+      a <- mvtnorm::rmvnorm(n = 2000, mean = estim$fit, sigma = V)
+      b <- apply(a, 2, function(x) {
+        (qnbinom(mu = exp(x), size = theta, p = 0.5))
+      })
+      c <- apply(b, 2, quantile, probs = c(0.025, 0.5, 0.975))
+      out$estim.median <- c[2, ]
+      out$estim.lower <- c[1, ]
+      out$estim.upper <- c[3, ]
+
+      # compute the covariance matrix of predictions
+      bcov <- cov(apply(a, 2, function(x) {
+        (qnbinom(mu = exp(x), size = theta, p = 0.5))
+      }))
+      # compute the variances of cumulative deaths
+      cv <- rep(0, length(estim$fit))
+      for (i in 1:length(cv)) {
+        cv[i] <- sum(bcov[1:i, 1:i])
+      }
+      # convert to the SD of cumulative deaths
+      scv <- pmax(0, sqrt(cv))
+      out$SE_CUM_EXPECTED <- scv
+    }
+
+    out_nb <- out %>%
+      mutate(SERIES = "Cyclical spline") %>%
+      rename(ESTIMATE = estim.median, LOWER_LIMIT = estim.lower, UPPER_LIMIT = estim.upper)
+
+    message("Done!")
+
+    bind_rows(predict_data %>%
+      mutate(SERIES = "Current deaths"), out_hist, out_nb) %>%
+      as.data.frame()
+  })
+
+  # Output processing and returning the processed data frame
+  out <- do.call("rbind", pout)
+
+  out$WM_IDENTIFIER <- rep(wm_ident)
+  out[, "EXCESS_DEATHS"] <- out$NO_DEATHS - out$ESTIMATE
+  out[, "P_SCORE"] <- 100 * (out$NO_DEATHS - out$ESTIMATE) / out$ESTIMATE
+  out[, "EXPECTED"] <- out$ESTIMATE
+  out[, "EXCESS_UPPER"] <- out$NO_DEATHS - out$LOWER_LIMIT
+  out[, "EXCESS_LOWER"] <- out$NO_DEATHS - out$UPPER_LIMIT
+
+  out <- out[, c("REGION", "WM_IDENTIFIER", "YEAR", "PERIOD", "SEX", "AGE_GROUP", "CAUSE", "EVENTS", "SERIES", "NO_DEATHS", "EXPECTED", "LOWER_LIMIT", "UPPER_LIMIT", "EXCESS_DEATHS", "P_SCORE", "EXCESS_LOWER", "EXCESS_UPPER", "SE_CUM_EXPECTED")]
+
+  message("Computation of the expected deaths completed successfully.")
+  # To be confirmed!!!!
+  attr(out, "num_deaths") <- sum(out$NO_DEATHS, na.rm = TRUE) / n_pat / l_period
+  attr(out, "SE_cumulative_deaths") <- NA
+  
+  return(out)
+}
+
+# Apply the spline calculation function to the dataset and write results to Excel
+# pout <- calculate_spline(df0, events_date = list(c("2020-01-01", "2024-05-31")))
+
+
+calculate_spline2 <- function(src) {
 
 # src <- src[src$SEX %in% c("Female","Male","Total") & src$AGE_GROUP=="Total",]
 
