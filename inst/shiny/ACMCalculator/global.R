@@ -256,6 +256,7 @@ calculate_spline <- function(src, events_date = list(c("2020-01-01", "2023-05-31
       ##############################################
       # Method 3
       estim <- mgcv::predict.gam(fit, newdata = predict_data, se.fit = TRUE)
+      theta <- fit$family$getTheta(TRUE)
       # covariance of predictors
       Terms <- list(stats::delete.response(fit$pterms))
       mf <- model.frame(Terms[[1]], predict_data, xlev = fit$xlevels)
