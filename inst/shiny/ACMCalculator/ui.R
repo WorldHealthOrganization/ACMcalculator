@@ -197,7 +197,10 @@ fluidRow(
                  downloadButton('download_templates',"Download template"), br()," ",br(),
                     p(class="helper", id="Excelhelpweeks", icon("question-circle"),
                       span("I have weekly data. Where do I enter the number of days in each week?", style="font-size:0.85em;"),
-                 br(), "Please remember to enter in the Excel file the number of days in each week, especially for weeks 1 and 53. These should be entered for each year (2015, 2016, ...) on row 4 in the column for that week. They are pre-entered as 7.")
+                 br(), "Please remember to enter in the Excel file the number of days in each week, especially for weeks 1 and 53. These should be entered for each year (2015, 2016, ...) on row 4 in the column for that week. They are pre-entered as 7."),
+                    p(class="helper", id="Excelhelpweeks", icon("question-circle"),
+                      span("My era of COVID differs from Jan 1 2020 to May 5 2023. How do I change the era?", style="font-size:0.85em;"),
+                 br(), "Enter in the Excel file the word START in the column which is the first period subject to COVID and in the row above the period row. Also add the word END to the column which is the last period subject to COVID in the row above the period row. The Calculator will use those dates.")
              ),
              column(8,
                     br(), p("Once you have familiarized yourself with the template, use this pull-down list below to upload your own data in a WHO standardized Excel sheet or use a built-in example data set"),
