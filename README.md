@@ -26,7 +26,7 @@ then `R` should install the app and close. There will then be an app called "ACM
 * Alternatively, you can install it on your local machine using the ACMCalculator R package. First install it for `R`:
 ```r
 install.packages("devtools")
-devtools::install_github("WorldHealthOrganization/ACMcalculator")    
+devtools::install_github("WorldHealthOrganization/ACMCalculator")    
 ```
 then run it from `R`:
 ```r
@@ -34,7 +34,7 @@ ACMCalculator::run()
 ```
 
 More info on the ACMCalculator wiki:   
-https://github.com/WorldHealthOrganization/ACMcalculator/wiki
+https://github.com/WorldHealthOrganization/ACMCalculator/wiki
 
 Please use the GitHub repository to report bugs or request features:
-https://github.com/WorldHealthOrganization/ACMcalculator
+https://github.com/WorldHealthOrganization/ACMCalculator

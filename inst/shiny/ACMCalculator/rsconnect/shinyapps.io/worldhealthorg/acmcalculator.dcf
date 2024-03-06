@@ -1,0 +1,10 @@
+name: acmcalculator
+title:
+username: worldhealthorg
+account: worldhealthorg
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 11415067
+bundleId: 8337785
+url: https://worldhealthorg.shinyapps.io/acmcalculator/
+version: 1
